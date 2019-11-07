@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:cxf="http://camel.apache.org/schema/cxf"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd        http://camel.apache.org/schema/spring       http://camel.apache.org/schema/spring/camel-spring.xsd http://camel.apache.org/schema/cxf http://camel.apache.org/schema/cxf/camel-cxf.xsd">
+	<import resource="classpath:META-INF/cxf/cxf.xml"/>
+    <import resource="classpath:cxfEndpointConfig.xml"/>
+    <bean id="auditEventNotifier"
+          class="com.pactera.event.AuditEventNotifier">
+    </bean>
+    <bean id="camelProccess" class="com.pactera.proccess.CamelProccess"/>
+    <bean id="xmlJsonDataFormat" class="org.apache.camel.dataformat.xmljson.XmlJsonDataFormat">
+        <property name="encoding" value="UTF-8"/>
+        <property name="elementName" value="${camel.wsdl.elementName}"/>
+        <property name="removeNamespacePrefixes" value="true"/>
+        <property name="forceTopLevelObject" value="true"/>
+        <property name="trimSpaces" value="true"/>
+        <property name="skipNamespaces" value="true"/>
+    </bean>
+
+	<camelContext id="camel"
+				  xmlns="http://camel.apache.org/schema/spring">
+        <propertyPlaceholder location="classpath:application.properties" id="properties" cache="false"/>
+        <rest apiDocs="true"
+              id="wsdl-rest" path="/service" consumes="application/json">
+            <post apiDocs="true"
+                  id="post-wsdl-rest" consumes="application/json" produces="application/json"
+                   uri="/matchwsdl" bindingMode="auto">
+                <param name="body" type="body" dataFormat="json"/>
+                <param name="token" type="header" dataType="String" required="false"/>
+                <responseMessage message="request SuccessFully!" code="200" responseModel="com.pactera.excep_json.JsonResult"/>
+                <responseMessage message="request not found!" code="404" responseModel="com.pactera.excep_json.JsonResult"/>
+                <responseMessage message="Server Error!" code="500" responseModel="com.pactera.excep_json.JsonResult"/>
+                <to uri="direct:inbox" />
+            </post>
+        </rest>
+        <route streamCache="true">
+            <from uri="direct:inbox"/>
+            <process ref="camelRequestProccess"/>
+            <onException id="_onException1">
+                <exception>java.lang.Exception</exception>
+                <redeliveryPolicy maximumRedeliveries="3" />
+                <handled>
+                    <simple>true</simple>
+                </handled>
+                <process ref="globalExceptionProccess"/>
+                <log id="_logex" message=">> Exception : ${body}" />
+
+                <setExchangePattern id="_setExchangePattern1"
+                                    pattern="InOnly" />
+                <to id="_toerror" uri="seda:error" pattern="InOnly"/>
+            </onException>
+            <log message=">>camel.wsdl.serviceName: {{camel.wsdl.serviceName}}"/>
+            <choice>
+                <when>
+                    <simple>${in.header.tokenStatus} == 0</simple>
+                    <setHeader headerName="Content-Type">
+                        <simple>{{camel.wsdl.request.header.content-Type}}</simple>
+                    </setHeader>
+                    <to uri="cxf:bean:oneWayTtEndpoint?dataFormat=RAW"/>
+                    <choice>
+                        <when>
+                            <simple>${in.header.content-encoding} == 'gzip'</simple>
+                            <log message="this is responseGzipConvert"/>
+                            <to uri="direct:responseGzipConvert"/>
+                        </when>
+                        <otherwise>
+                            <log message="this is otherwise!!!!!!!"/>
+                            <!--Test Body Context-->
+                            <to uri="bean:camelResponseBodyRoute?method=process"/>
+                            <to uri="direct:marshalEmployeexml2json"/>
+                        </otherwise>
+                    </choice>
+                    <!--<choice>
+                        <when>
+                            <simple>${in.header.isXML} == true </simple>
+                            <to uri="direct:marshalEmployeexml2json"/>
+                        </when>
+                    </choice>-->
+                    <process ref="camelResponseProccess"/>
+                </when>
+                <otherwise>
+                    <to uri="bean:tokenValidProcess?method=process"/>
+                    <to id="_toerror" uri="seda:error"  pattern="InOnly"/>
+                </otherwise>
+            </choice>
+            <onException>
+                <exception>javax.jms.JMSException</exception>
+                <redeliveryPolicy maximumRedeliveries="2" />
+                <handled>
+                    <constant>true</constant>
+                </handled>
+                <process ref="globalExceptionProccess"/>
+            </onException>
+            <onException id="_onException1">
+                <exception>java.lang.Exception</exception>
+                <redeliveryPolicy maximumRedeliveries="3" />
+                <handled>
+                    <simple>true</simple>
+                </handled>
+                <process ref="globalExceptionProccess"/>
+                <log id="_logex" message=">> Exception : ${body}" />
+                <setExchangePattern id="_setExchangePattern1"
+                                    pattern="InOnly" />
+                <to id="_toerror" uri="seda:error" pattern="InOnly"/>
+            </onException>
+           <!-- <to uri="seda:loginfo" pattern="InOnly"/>-->
+            <onException id="_onException1">
+                <exception>java.lang.Exception</exception>
+                <redeliveryPolicy maximumRedeliveries="3" />
+                <handled>
+                    <simple>true</simple>
+                </handled>
+                <process ref="globalExceptionProccess"/>
+                <log id="_logex" message=">> Exception : ${body}" />
+                <setExchangePattern id="_setExchangePattern1"
+                                    pattern="InOnly" />
+                <to id="_toerror" uri="seda:error" pattern="InOnly"/>
+            </onException>
+            <to uri="seda:loginfo" pattern="InOnly"/>
+            <log id="_log6" message=">> Body : ${body}" />
+        </route>
+
+        <!--log data convert Route-->
+        <route id="_logDataFormatRoute" streamCache="true">
+            <from id="_fromLogDataFormatUR" uri="direct:logDataFormat" />
+            <to id="_to5"  uri="bean:logDataformat?method=process" />
+        </route>
+        <!--send log Info message to MQ Queue Route-->
+        <route id="_logroute" streamCache="true">
+            <from id="_fromIR1" uri="seda:loginfo?synchronous=true" />
+            <setExchangePattern pattern="InOnly"/>
+            <!--so send message need to String Type that to direct:audit data type convert!-->
+            <to uri="direct:logDataFormat"/>
+            <convertBodyTo type="String"/>
+            <to id="_tologq" uri="amqp:queue:amqp:queue:q.hzinte.logq?asyncConsumer=true"  pattern="InOnly" />
+            <onException>
+                <exception>java.lang.Exception</exception>
+                <redeliveryPolicy maximumRedeliveries="2" />
+                <handled>
+                    <constant>true</constant>
+                </handled>
+                <process ref="globalExceptionProccess"/>
+            </onException>
+        </route>
+        <!--send log Error message to MQ Queue Route-->
+        <route id="_errorroute" streamCache="true">
+            <from id="_fromIR1" uri="seda:error?synchronous=true" />
+            <setExchangePattern pattern="InOnly"/>
+            <!--so send message need to String Type that to direct:audit data type convert!-->
+            <to uri="direct:logDataFormat"/>
+            <to id="_toerrorq" uri="amqp:queue:q.hzinte.errorq" pattern="InOnly" />
+            <onException>
+                <exception>java.lang.Exception</exception>
+                <redeliveryPolicy maximumRedeliveries="2" />
+                <handled>
+                    <constant>true</constant>
+                </handled>
+                <process ref="globalExceptionProccess"/>
+            </onException>
+        </route>
+	</camelContext>
+
+</beans>

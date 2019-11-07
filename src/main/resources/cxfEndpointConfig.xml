@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:cxf="http://camel.apache.org/schema/cxf"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd        http://camel.apache.org/schema/spring       http://camel.apache.org/schema/spring/camel-spring.xsd http://camel.apache.org/schema/cxf http://camel.apache.org/schema/cxf/camel-cxf.xsd">
+    <cxf:cxfEndpoint id="oneWayTtEndpoint"
+                     address="${camel.wsdl.url}"
+                     serviceName="ns1:TextCasing" endpointName="ns1:TextCasingSoap"
+                     xmlns:ns1="http://www.dataaccess.com/webservicesserver/">
+        <cxf:properties>
+            <entry key="dataFormat" value="RAW" />
+            <entry key="schema-validation-enabled" value="false" />
+            <entry key="exceptionMessageCauseEnabled" value="true" />
+            <entry key="faultStackTraceEnabled" value="true" />
+            <entry key="wsdlURL" value="${camel.wsdl.url}?wsdl" />
+            <entry key="loggingFeatureEnabled" value="true" />
+        </cxf:properties>
+    </cxf:cxfEndpoint>
+</beans>
